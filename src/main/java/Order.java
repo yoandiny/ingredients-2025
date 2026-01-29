@@ -7,6 +7,7 @@ public class Order {
     private String reference;
     private Instant creationDatetime;
     private List<DishOrder> dishOrderList;
+    private PaymentStatusEnum payment_status;
 
     public Integer getId() {
         return id;
@@ -38,6 +39,14 @@ public class Order {
 
     public void setDishOrderList(List<DishOrder> dishOrderList) {
         this.dishOrderList = dishOrderList;
+    }
+
+    public PaymentStatusEnum getPaymentStatus() {
+        return payment_status;
+    }
+
+    public void setPaymentStatus(PaymentStatusEnum paymentStatus) {
+        this.payment_status = paymentStatus;
     }
 
     @Override
