@@ -9,20 +9,36 @@ public class DataRetriever {
     Order findOrderByReference(String reference) {
         DBConnection dbConnection = new DBConnection();
         try (Connection connection = dbConnection.getConnection()) {
+
             PreparedStatement preparedStatement = connection.prepareStatement("""
-                    select id, reference, creation_datetime from "order" where reference like ?""");
+            SELECT id, reference, creation_datetime, payment_status
+            FROM "order"
+            WHERE reference = ?
+        """);
             preparedStatement.setString(1, reference);
+
             ResultSet resultSet = preparedStatement.executeQuery();
             if (resultSet.next()) {
                 Order order = new Order();
+
                 Integer idOrder = resultSet.getInt("id");
                 order.setId(idOrder);
                 order.setReference(resultSet.getString("reference"));
                 order.setCreationDatetime(resultSet.getTimestamp("creation_datetime").toInstant());
-                order.setDishOrderList(findDishOrderByIdOrder(idOrder));
+
+                // Nouveau: payment_status -> PaymentStatusEnum
+                String paymentStatusStr = resultSet.getString("payment_status");
+                if (paymentStatusStr != null) {
+                    order.setPaymentStatus(PaymentStatusEnum.valueOf(paymentStatusStr));
+                }
+
+                // Déjà présent: lignes de commande
+                order.setDishOrderList(findDishOrderByIdOrder(idOrder)); // [2]
+
                 return order;
             }
-            throw new RuntimeException("Order not found with reference " + reference);
+            return null;
+
         } catch (SQLException e) {
             throw new RuntimeException(e);
         }
@@ -420,6 +436,95 @@ public class DataRetriever {
 
         try (PreparedStatement ps = conn.prepareStatement(setValSql)) {
             ps.executeQuery();
+        }
+    }
+
+
+
+    private void deleteDishOrders(Connection conn, int orderId) throws SQLException {
+        String sql = "DELETE FROM dish_order WHERE id_order = ?";
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            ps.setInt(1, orderId);
+            ps.executeUpdate();
+        }
+    }
+
+    private void insertDishOrders(Connection conn, Order order, int orderId) throws SQLException {
+        String sql = """
+        INSERT INTO dish_order (id, id_order, id_dish, quantity)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT (id) DO UPDATE
+        SET id_dish = EXCLUDED.id_dish,
+            quantity = EXCLUDED.quantity
+    """;
+
+        try (PreparedStatement ps = conn.prepareStatement(sql)) {
+            if (order.getDishOrderList() == null) return;
+
+            for (DishOrder d : order.getDishOrderList()) {
+                int lineId = (d.getId() != null)
+                        ? d.getId()
+                        : getNextSerialValue(conn, "dish_order", "id"); // même helper [1]
+
+                ps.setInt(1, lineId);
+                ps.setInt(2, orderId);
+                ps.setInt(3, d.getDish().getId());   // à adapter selon DishOrder
+                ps.setInt(4, d.getQuantity());       // à adapter selon DishOrder
+                ps.addBatch();
+            }
+            ps.executeBatch();
+        }
+    }
+
+    public Order saveOrder(Order toSave) {
+        String upsertOrderSql = """
+        INSERT INTO orders (id, reference, creation_datetime, payment_status)
+        VALUES (?, ?, ?, ?::payment_status)
+        ON CONFLICT (id) DO UPDATE
+        SET reference = EXCLUDED.reference,
+            creation_datetime = EXCLUDED.creation_datetime,
+            payment_status = EXCLUDED.payment_status
+        RETURNING id
+    """;
+
+        try (Connection conn = new DBConnection().getConnection()) {
+            conn.setAutoCommit(false);
+
+            try {
+                // 1) UPSERT Order (pattern identique à saveIngredient) [1]
+                int orderId;
+                try (PreparedStatement ps = conn.prepareStatement(upsertOrderSql)) {
+
+                    int id = (toSave.getId() != null)
+                            ? toSave.getId()
+                            : getNextSerialValue(conn, "orders", "id"); // fourni chez toi [1]
+
+                    ps.setInt(1, id);
+                    ps.setString(2, toSave.getReference());
+                    ps.setTimestamp(3, Timestamp.from(toSave.getCreationDatetime()));
+
+                    // IMPORTANT: nécessite getPaymentStatus() ajouté
+                    ps.setString(4, toSave.getPaymentStatus().name());
+
+                    try (ResultSet rs = ps.executeQuery()) {
+                        rs.next();
+                        orderId = rs.getInt(1);
+                    }
+                }
+
+                // 2) Lignes de commande
+                // Stratégie simple : delete puis insert (le plus facile à fiabiliser)
+                deleteDishOrders(conn, orderId);
+                insertDishOrders(conn, toSave, orderId);
+
+                conn.commit();
+                return findOrderByReference(toSave.getReference());
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new RuntimeException(e);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
         }
     }
 }
