@@ -436,7 +436,7 @@ public class DataRetriever {
 
     public Order saveOrder(Order toSave) {
         String upsertOrderSql = """
-        INSERT INTO orders (id, reference, creation_datetime, payment_status)
+        INSERT INTO order (id, reference, creation_datetime, payment_status)
         VALUES (?, ?, ?, ?::payment_status)
         ON CONFLICT (id) DO UPDATE
         SET reference = EXCLUDED.reference,
@@ -471,6 +471,68 @@ public class DataRetriever {
                 insertDishOrders(conn, toSave, orderId);
                 conn.commit();
                 return findOrderByReference(toSave.getReference());
+            } catch (SQLException e) {
+                conn.rollback();
+                throw new RuntimeException(e);
+            }
+        } catch (SQLException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    Order updateOrder(Order toUpdate) {
+        if (toUpdate.getId() == null) {
+            throw new IllegalArgumentException("Order.id est obligatoire pour modifier une commande.");
+        }
+
+        String lockSql = """
+        SELECT payment_status
+        FROM "order"
+        WHERE id = ?
+        FOR UPDATE
+    """;
+
+        String updateOrderSql = """
+        UPDATE "order"
+        SET reference = ?, creation_datetime = ?, payment_status = ?::payment_status
+        WHERE id = ?
+    """;
+
+        try (Connection conn = new DBConnection().getConnection()) {
+            conn.setAutoCommit(false);
+
+            try {
+                PaymentStatusEnum currentStatus;
+                try (PreparedStatement ps = conn.prepareStatement(lockSql)) {
+                    ps.setInt(1, toUpdate.getId());
+                    try (ResultSet rs = ps.executeQuery()) {
+                        if (!rs.next()) {
+                            throw new RuntimeException("Commande introuvable: " + toUpdate.getId());
+                        }
+                        String s = rs.getString("payment_status");
+                        currentStatus = (s == null) ? null : PaymentStatusEnum.valueOf(s);
+                    }
+                }
+
+                if (currentStatus == PaymentStatusEnum.PAID) {
+                    throw new IllegalStateException(
+                            "La commande a déjà été payée et ne peut plus être modifiée."
+                    );
+                }
+
+                try (PreparedStatement ps = conn.prepareStatement(updateOrderSql)) {
+                    ps.setString(1, toUpdate.getReference());
+                    ps.setTimestamp(2, Timestamp.from(toUpdate.getCreationDatetime()));
+                    ps.setString(3, toUpdate.getPaymentStatus().name());
+                    ps.setInt(4, toUpdate.getId());
+                    ps.executeUpdate();
+                }
+
+                deleteDishOrders(conn, toUpdate.getId());         // [2]
+                insertDishOrders(conn, toUpdate, toUpdate.getId()); // [2]
+
+                conn.commit();
+                return findOrderByReference(toUpdate.getReference());
             } catch (SQLException e) {
                 conn.rollback();
                 throw new RuntimeException(e);
