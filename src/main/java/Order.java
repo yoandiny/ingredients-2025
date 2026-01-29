@@ -7,7 +7,9 @@ public class Order {
     private String reference;
     private Instant creationDatetime;
     private List<DishOrder> dishOrderList;
-    private PaymentStatusEnum payment_status;
+    private Sale sale;
+    private PaymentStatusEnum paymentStatus;
+
 
     public Integer getId() {
         return id;
@@ -42,11 +44,11 @@ public class Order {
     }
 
     public PaymentStatusEnum getPaymentStatus() {
-        return payment_status;
+        return paymentStatus;
     }
 
     public void setPaymentStatus(PaymentStatusEnum paymentStatus) {
-        this.payment_status = paymentStatus;
+        this.paymentStatus = paymentStatus;
     }
 
 
