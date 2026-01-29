@@ -1,3 +1,5 @@
+import jdk.jshell.spi.ExecutionControl;
+
 import java.time.Instant;
 
 public class Sale {
@@ -22,4 +24,8 @@ public class Sale {
     public Order getOrder() {
         return order;
     }
+
+    Sale createSaleFrom(Order order) {
+      throw new RuntimeException("Not implemented yet");
+    };
 }
