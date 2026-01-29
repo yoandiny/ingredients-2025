@@ -134,6 +134,7 @@ public class DataRetriever {
                 on conflict (id) do nothing
                 """;
         try {
+
             PreparedStatement preparedStatement = conn.prepareStatement(sql);
             for (StockMovement stockMovement : stockMovementList) {
                 if (ingredient.getId() != null) {
